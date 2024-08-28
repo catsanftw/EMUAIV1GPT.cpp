@@ -1,31 +1,83 @@
 #include <QApplication>
 #include <QMainWindow>
 #include <QPushButton>
-#include <QTextEdit>
-#include <QFileDialog>
-#include <QString>
-#include <QStatusBar>
 #include <QVBoxLayout>
+#include <QFileDialog>
 #include <QLabel>
-#include <QGroupBox>
+#include <QStatusBar>
+#include <QString>
 #include <iostream>
-#include <vector>
-#include <cstring>
+#include <fstream>
 
-#define MEMORY_SIZE 1024
-
-enum Instructions {
-    NOP, LDI, ADD, SUB, JMP, HLT
-};
+// Simplified MIPS R4300i CPU emulation
+#define MEMORY_SIZE 4096
+#define R4300_REGS 32
 
 struct CPU {
-    int registers[4] = {0};
-    int pc = 0;
+    uint32_t pc = 0;
+    uint32_t regs[R4300_REGS] = {0};
     bool running = true;
 };
 
-int memory[MEMORY_SIZE];
+uint32_t memory[MEMORY_SIZE] = {0};
+CPU cpu;
 
+void init_r4300() {
+    // Initialize CPU
+    cpu.pc = 0;
+    std::fill(std::begin(cpu.regs), std::end(cpu.regs), 0);
+    cpu.running = true;
+}
+
+int load_rom(const char *filename) {
+    std::ifstream romfile(filename, std::ios::binary);
+    if (!romfile.is_open()) {
+        std::cerr << "Error: Unable to open ROM file." << std::endl;
+        return -1;
+    }
+
+    romfile.read(reinterpret_cast<char*>(memory), MEMORY_SIZE * sizeof(uint32_t));
+    romfile.close();
+
+    return 0;
+}
+
+void run_r4300_instruction() {
+    uint32_t instruction = memory[cpu.pc / 4]; // Simplified fetching
+    cpu.pc += 4;
+
+    switch (instruction & 0xFC000000) { // Very simplified decoding
+        case 0x20000000: // ADDI (simplified)
+            cpu.regs[(instruction >> 16) & 0x1F] = cpu.regs[(instruction >> 21) & 0x1F] + (int16_t)(instruction & 0xFFFF);
+            break;
+        case 0x0C000000: // J (jump simplified)
+            cpu.pc = (cpu.pc & 0xF0000000) | ((instruction & 0x03FFFFFF) << 2);
+            break;
+        default:
+            break;
+    }
+
+    if (cpu.pc >= MEMORY_SIZE * 4 || instruction == 0x00000000) {
+        cpu.running = false;
+    }
+}
+
+bool cpu_running() {
+    return cpu.running;
+}
+
+// Simplified PPU emulation (placeholder)
+void init_video() {
+    // Initialize video subsystem
+    std::cout << "Video initialized." << std::endl;
+}
+
+void update_video() {
+    // Render a single frame (placeholder)
+    std::cout << "Frame rendered." << std::endl;
+}
+
+// Qt GUI Application
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -33,22 +85,16 @@ public:
     ~MainWindow() {}
 
 private slots:
-    void loadISO();
-    void startSimulation();
+    void loadROM();
+    void startEmulation();
 
 private:
     QPushButton *loadButton;
     QPushButton *startButton;
-    QTextEdit *textEdit;
-    CPU cpu;
-    
-    QLabel *registersDisplay;
-    QLabel *memoryDisplay;
-    QStatusBar *statusBar;
+    QLabel *statusDisplay;
+    QString loadedROM;
 
-    void run();
-    void bios();
-    void updateHUD();
+    void runEmulator();
 };
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
@@ -56,105 +102,52 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     QWidget *centralWidget = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(centralWidget);
-    
-    loadButton = new QPushButton("Load ISO", this);
-    connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadISO);
 
-    startButton = new QPushButton("Start Simulation", this);
-    connect(startButton, &QPushButton::clicked, this, &MainWindow::startSimulation);
+    loadButton = new QPushButton("Load ROM", this);
+    connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadROM);
 
-    textEdit = new QTextEdit(this);
-    textEdit->setReadOnly(true);
+    startButton = new QPushButton("Start Emulation", this);
+    connect(startButton, &QPushButton::clicked, this, &MainWindow::startEmulation);
 
-    registersDisplay = new QLabel("Registers:\nR0: 0\nR1: 0\nR2: 0\nR3: 0", this);
-    memoryDisplay = new QLabel("Memory: (first 10 cells)\n[0]: 0\n[1]: 0\n[2]: 0\n...", this);
-
-    QGroupBox *hudGroup = new QGroupBox("HUD", this);
-    QVBoxLayout *hudLayout = new QVBoxLayout(hudGroup);
-    hudLayout->addWidget(registersDisplay);
-    hudLayout->addWidget(memoryDisplay);
+    statusDisplay = new QLabel("Status: Waiting", this);
 
     layout->addWidget(loadButton);
     layout->addWidget(startButton);
-    layout->addWidget(textEdit);
-    layout->addWidget(hudGroup);
+    layout->addWidget(statusDisplay);
 
     setCentralWidget(centralWidget);
-    
-    statusBar = new QStatusBar(this);
-    setStatusBar(statusBar);
-
-    bios();
 }
 
-void MainWindow::loadISO() {
-    QString fileName = QFileDialog::getOpenFileName(this, "Open ISO File", "", "ISO Files (*.iso);;All Files (*)");
-    if (!fileName.isEmpty()) {
-        textEdit->append("ISO Loaded: " + fileName);
-        // Here you would parse the file and load it into memory
-        // Simulating by loading a simple program into memory
-        memory[0] = LDI; memory[1] = 1; memory[2] = 10;
-        memory[3] = LDI; memory[4] = 2; memory[5] = 20;
-        memory[6] = ADD; memory[7] = 3; memory[8] = 1; memory[9] = 2;
-        memory[10] = HLT;
+void MainWindow::loadROM() {
+    loadedROM = QFileDialog::getOpenFileName(this, "Open ROM File", "", "ROM Files (*.z64 *.n64 *.v64);;All Files (*)");
+    if (!loadedROM.isEmpty()) {
+        statusDisplay->setText("ROM Loaded: " + loadedROM);
     }
 }
 
-void MainWindow::startSimulation() {
-    textEdit->append("Starting the simulation...");
-    cpu.running = true;
-    cpu.pc = 0;
-    run();
+void MainWindow::startEmulation() {
+    if (!loadedROM.isEmpty()) {
+        statusDisplay->setText("Starting Emulation...");
+        runEmulator();
+    }
 }
 
-void MainWindow::run() {
-    while (cpu.running) {
-        int instruction = memory[cpu.pc++];
-        switch (instruction) {
-            case NOP: break;
-            case LDI:
-                cpu.registers[memory[cpu.pc++]] = memory[cpu.pc++];
-                break;
-            case ADD:
-                cpu.registers[memory[cpu.pc++]] = cpu.registers[memory[cpu.pc++]] + cpu.registers[memory[cpu.pc++]];
-                break;
-            case SUB:
-                cpu.registers[memory[cpu.pc++]] = cpu.registers[memory[cpu.pc++]] - cpu.registers[memory[cpu.pc++]];
-                break;
-            case JMP:
-                cpu.pc = memory[cpu.pc++];
-                break;
-            case HLT:
-                cpu.running = false;
-                break;
+void MainWindow::runEmulator() {
+    // Initialize CPU and Video
+    init_r4300();
+    init_video();
+
+    // Load ROM
+    if (load_rom(loadedROM.toStdString().c_str()) == 0) {
+        // Emulation loop (simplified)
+        while (cpu_running()) {
+            run_r4300_instruction();
+            update_video(); // Render frame
         }
-        updateHUD();
+        statusDisplay->setText("Emulation Finished.");
+    } else {
+        statusDisplay->setText("Failed to load ROM.");
     }
-    textEdit->append("Simulation finished.");
-}
-
-void MainWindow::bios() {
-    // BIOS initializes memory or could load a default program
-}
-
-void MainWindow::updateHUD() {
-    // Update the registers display
-    QString regText = QString("Registers:\nR0: %1\nR1: %2\nR2: %3\nR3: %4")
-        .arg(cpu.registers[0])
-        .arg(cpu.registers[1])
-        .arg(cpu.registers[2])
-        .arg(cpu.registers[3]);
-    registersDisplay->setText(regText);
-
-    // Update the memory display (showing the first few cells)
-    QString memText = "Memory: (first 10 cells)\n";
-    for (int i = 0; i < 10; i++) {
-        memText += QString("[%1]: %2\n").arg(i).arg(memory[i]);
-    }
-    memoryDisplay->setText(memText);
-
-    // Update the status bar with the current PC
-    statusBar->showMessage("Program Counter: " + QString::number(cpu.pc));
 }
 
 int main(int argc, char *argv[]) {
@@ -164,4 +157,4 @@ int main(int argc, char *argv[]) {
     return app.exec();
 }
 
-#include "mainwindow.moc"
+#include "Net64_Mupen.moc"
