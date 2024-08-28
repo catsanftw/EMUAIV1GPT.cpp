@@ -4,21 +4,23 @@
 #include <QTextEdit>
 #include <QFileDialog>
 #include <QString>
+#include <QStatusBar>
+#include <QVBoxLayout>
+#include <QLabel>
+#include <QGroupBox>
 #include <iostream>
 #include <vector>
 #include <cstring>
 
 #define MEMORY_SIZE 1024
-#define STACK_SIZE 256
 
 enum Instructions {
-    NOP, LDI, ADD, SUB, MUL, DIV, MOD, AND, OR, XOR, SHL, SHR, JMP, HLT, PUSH, POP, CALL, RET
+    NOP, LDI, ADD, SUB, JMP, HLT
 };
 
 struct CPU {
     int registers[4] = {0};
     int pc = 0;
-    int sp = MEMORY_SIZE; // Stack pointer starts at the end of memory
     bool running = true;
 };
 
@@ -39,27 +41,48 @@ private:
     QPushButton *startButton;
     QTextEdit *textEdit;
     CPU cpu;
+    
+    QLabel *registersDisplay;
+    QLabel *memoryDisplay;
+    QStatusBar *statusBar;
 
     void run();
     void bios();
-    void executeInstruction(int instruction);
-    void push(int value);
-    int pop();
+    void updateHUD();
 };
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setFixedSize(800, 600);
+
+    QWidget *centralWidget = new QWidget(this);
+    QVBoxLayout *layout = new QVBoxLayout(centralWidget);
+    
     loadButton = new QPushButton("Load ISO", this);
-    loadButton->setGeometry(50, 500, 100, 40);
     connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadISO);
 
     startButton = new QPushButton("Start Simulation", this);
-    startButton->setGeometry(650, 500, 150, 40);
     connect(startButton, &QPushButton::clicked, this, &MainWindow::startSimulation);
 
     textEdit = new QTextEdit(this);
-    textEdit->setGeometry(20, 20, 760, 450);
     textEdit->setReadOnly(true);
+
+    registersDisplay = new QLabel("Registers:\nR0: 0\nR1: 0\nR2: 0\nR3: 0", this);
+    memoryDisplay = new QLabel("Memory: (first 10 cells)\n[0]: 0\n[1]: 0\n[2]: 0\n...", this);
+
+    QGroupBox *hudGroup = new QGroupBox("HUD", this);
+    QVBoxLayout *hudLayout = new QVBoxLayout(hudGroup);
+    hudLayout->addWidget(registersDisplay);
+    hudLayout->addWidget(memoryDisplay);
+
+    layout->addWidget(loadButton);
+    layout->addWidget(startButton);
+    layout->addWidget(textEdit);
+    layout->addWidget(hudGroup);
+
+    setCentralWidget(centralWidget);
+    
+    statusBar = new QStatusBar(this);
+    setStatusBar(statusBar);
 
     bios();
 }
@@ -73,8 +96,7 @@ void MainWindow::loadISO() {
         memory[0] = LDI; memory[1] = 1; memory[2] = 10;
         memory[3] = LDI; memory[4] = 2; memory[5] = 20;
         memory[6] = ADD; memory[7] = 3; memory[8] = 1; memory[9] = 2;
-        memory[10] = MUL; memory[11] = 3; memory[12] = 1; memory[13] = 2;
-        memory[14] = HLT;
+        memory[10] = HLT;
     }
 }
 
@@ -88,58 +110,51 @@ void MainWindow::startSimulation() {
 void MainWindow::run() {
     while (cpu.running) {
         int instruction = memory[cpu.pc++];
-        executeInstruction(instruction);
+        switch (instruction) {
+            case NOP: break;
+            case LDI:
+                cpu.registers[memory[cpu.pc++]] = memory[cpu.pc++];
+                break;
+            case ADD:
+                cpu.registers[memory[cpu.pc++]] = cpu.registers[memory[cpu.pc++]] + cpu.registers[memory[cpu.pc++]];
+                break;
+            case SUB:
+                cpu.registers[memory[cpu.pc++]] = cpu.registers[memory[cpu.pc++]] - cpu.registers[memory[cpu.pc++]];
+                break;
+            case JMP:
+                cpu.pc = memory[cpu.pc++];
+                break;
+            case HLT:
+                cpu.running = false;
+                break;
+        }
+        updateHUD();
     }
-    for (int i = 0; i < 4; ++i) {
-        textEdit->append("Register " + QString::number(i) + ": " + QString::number(cpu.registers[i]));
-    }
+    textEdit->append("Simulation finished.");
 }
 
 void MainWindow::bios() {
-    // Initialize stack pointer and load bootloader or default program
-    cpu.sp = MEMORY_SIZE - 1; // Stack grows downwards
-    // Additional BIOS setup
+    // BIOS initializes memory or could load a default program
 }
 
-void MainWindow::executeInstruction(int instruction) {
-    switch (instruction) {
-        case NOP: break;
-        case LDI:
-            cpu.registers[memory[cpu.pc++]] = memory[cpu.pc++];
-            break;
-        case ADD:
-            cpu.registers[memory[cpu.pc++]] = cpu.registers[memory[cpu.pc++]] + cpu.registers[memory[cpu.pc++]];
-            break;
-        case MUL:
-            cpu.registers[memory[cpu.pc++]] = cpu.registers[memory[cpu.pc++]] * cpu.registers[memory[cpu.pc++]];
-            break;
-        case HLT:
-            cpu.running = false;
-            break;
-        // Other cases for new instructions
-        default:
-            textEdit->append("Unknown instruction at PC: " + QString::number(cpu.pc));
-            cpu.running = false;
-            break;
-    }
-}
+void MainWindow::updateHUD() {
+    // Update the registers display
+    QString regText = QString("Registers:\nR0: %1\nR1: %2\nR2: %3\nR3: %4")
+        .arg(cpu.registers[0])
+        .arg(cpu.registers[1])
+        .arg(cpu.registers[2])
+        .arg(cpu.registers[3]);
+    registersDisplay->setText(regText);
 
-void MainWindow::push(int value) {
-    if (cpu.sp <= 0) {
-        textEdit->append("Stack overflow!");
-        cpu.running = false;
-        return;
+    // Update the memory display (showing the first few cells)
+    QString memText = "Memory: (first 10 cells)\n";
+    for (int i = 0; i < 10; i++) {
+        memText += QString("[%1]: %2\n").arg(i).arg(memory[i]);
     }
-    memory[--cpu.sp] = value;
-}
+    memoryDisplay->setText(memText);
 
-int MainWindow::pop() {
-    if (cpu.sp >= MEMORY_SIZE) {
-        textEdit->append("Stack underflow!");
-        cpu.running = false;
-        return -1;
-    }
-    return memory[cpu.sp++];
+    // Update the status bar with the current PC
+    statusBar->showMessage("Program Counter: " + QString::number(cpu.pc));
 }
 
 int main(int argc, char *argv[]) {
